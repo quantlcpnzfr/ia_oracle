@@ -229,9 +229,12 @@ class OracleMongoStore(BaseStore):
     @staticmethod
     def _build_fields(item: OracleReviewResponse) -> dict:
         """Mutable fields written on both insert and update."""
-        return {
+        fields = {
             "action":           item.action,
             "oracle_confidence": item.oracle_confidence,
             "reasoning":        item.reasoning,
             "tags_to_emit":     item.tags_to_emit or [],
         }
+        if item.observability != {}:
+            fields["observability"] = item.to_dict()["observability"]
+        return fields

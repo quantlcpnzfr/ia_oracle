@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -232,6 +233,7 @@ def _build_global_tags(
                 active=True,
                 domain=directive.get("domain") or domain,
                 source=directive.get("source") or source,
+                observability=deepcopy(response.observability),
             )
         )
 
@@ -474,6 +476,8 @@ class OracleWorker(Loggable):
 
                 raw      = await self._provider.generate(user_prompt, system_prompt=system_prompt)
                 response = _parse_response(raw, event_id)
+                # Provenance comes from the received request, never the LLM.
+                response.observability = deepcopy(req.observability)
 
                 self.log.info(
                     "[OracleWorker:%s] Resolved  id=%s  action=%s  confidence=%.2f  reasoning=%.100s",
