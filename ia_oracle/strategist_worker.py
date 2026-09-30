@@ -17,7 +17,8 @@ import asyncio
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -39,11 +40,13 @@ class StrategistWorker:
         self, 
         store: StrategistStore, 
         worker_id: str = "strategist_1",
-        model_override: Optional[str] = None
+        model_override: Optional[str] = None,
+        emit_downstream_actions: bool = False,
     ):
         self.store = store
         self.worker_id = worker_id
         self.model_override = model_override
+        self.emit_downstream_actions = emit_downstream_actions
         
         self.prompts_dir = Path("C:/Projects/forex_system/services/ia_oracle/ia_oracle/prompts")
         self.provider = None
@@ -56,6 +59,14 @@ class StrategistWorker:
 
     async def start(self):
         """Initialize IA provider and start the synthesis loop/trigger listener."""
+        from ia_oracle.providers.ollama_provider import OllamaProvider
+        from ia_oracle.providers.gemini_provider import GeminiIAProvider
+        from ia_oracle.providers.openai_provider import OpenAIIAProvider
+
+        IAProviderFactory.register_provider("OLLAMA", OllamaProvider)
+        IAProviderFactory.register_provider("GEMINI", GeminiIAProvider)
+        IAProviderFactory.register_provider("OPENAI_NATIVE", OpenAIIAProvider)
+        await self.store.ensure_indexes()
         self.provider = IAProviderFactory.create_from_env(ollama_profile="strategist")
         # Ensure we are using the local Qwen model for synthesis
         if hasattr(self.provider, "model") and self.model_override:
@@ -384,16 +395,17 @@ class StrategistWorker:
                 log.info("Global Pulse Synthesis completed successfully.")
                 
                 # Emit Regional Bias Tags (Refinement #3: Actionable Regional Execution)
-                try:
-                    await self._emit_regional_bias_tags(pulse)
-                except Exception as reg_e:
-                    log.warning("Failed to emit regional bias tags: %s", reg_e)
+                if self.emit_downstream_actions:
+                    try:
+                        await self._emit_regional_bias_tags(pulse)
+                    except Exception as reg_e:
+                        log.warning("Failed to emit regional bias tags: %s", reg_e)
 
-                # Emit High Conviction Trading Signals (Refinement #5: Fundamental-Technical Fusion)
-                try:
-                    await self._emit_high_conviction_signals(pulse)
-                except Exception as sig_e:
-                    log.warning("Failed to emit high conviction signals: %s", sig_e)
+                    # Trading signals require explicit operational enablement.
+                    try:
+                        await self._emit_high_conviction_signals(pulse)
+                    except Exception as sig_e:
+                        log.warning("Failed to emit high conviction signals: %s", sig_e)
                 
                 return "COMPLETED"
                 
@@ -585,6 +597,12 @@ class StrategistWorker:
                 timeout=1200.0
             )
             d_data = self._parse_json(raw)
+            sitrep = str(
+                (d_data or {}).get("domain_sitrep")
+                or (d_data or {}).get("summary")
+                or raw
+            ).strip()
+            normalized_domain = {"domain_sitrep": sitrep} if sitrep else None
             await self.store.save_synthesis_checkpoint(
                 run_id=run_id,
                 stage=f"domain_{domain.lower()}",
@@ -592,7 +610,7 @@ class StrategistWorker:
                     "domain": domain,
                     "story_count": len(d_stories),
                     "raw": raw,
-                    "parsed": d_data,
+                    "parsed": normalized_domain,
                 },
             )
             await self.store.update_pulse_run(
@@ -600,11 +618,11 @@ class StrategistWorker:
                 stage=f"domain_{domain.lower()}",
                 fields={
                     f"domain_raw_outputs.{domain.lower()}": raw,
-                    f"domain_outputs.{domain.lower()}": d_data,
+                    f"domain_outputs.{domain.lower()}": normalized_domain,
                 },
             )
-            if d_data:
-                domain_pulses[domain.lower()] = d_data.get("domain_sitrep", "")
+            if sitrep:
+                domain_pulses[domain.lower()] = sitrep
         
         return domain_pulses
 

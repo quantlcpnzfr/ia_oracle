@@ -82,7 +82,7 @@ class StrategistStore(BaseStore):
             {
                 "$lookup": {
                     "from": "oracle_resolved",
-                    "localField": "intel_id",
+                    "localField": "item_id",
                     "foreignField": "trigger_event_id",
                     "as": "oracle_info"
                 }
